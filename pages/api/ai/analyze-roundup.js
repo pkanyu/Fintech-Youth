@@ -1,4 +1,3 @@
-// File: pages/api/ai/analyze-roundup.js
 // Groq AI analysis for roundup decisions
 
 import Groq from "groq-sdk";
@@ -15,7 +14,6 @@ export default async function handler(req, res) {
   const { amount, transactionHistory } = req.body;
 
   try {
-    // Calculate user spending patterns
     const avgTransaction =
       transactionHistory.length > 0
         ? transactionHistory.reduce((sum, t) => sum + t.amount, 0) /
@@ -27,7 +25,6 @@ export default async function handler(req, res) {
     const savingsRate =
       totalSpent > 0 ? ((totalSaved / totalSpent) * 100).toFixed(2) : 0;
 
-    // Create AI prompt
     const prompt = `You are a financial advisor AI helping Kenyan users save money through M-Pesa roundups.
 
 User's Spending Profile:
@@ -43,10 +40,8 @@ Rules:
 1. Roundup options: nearest 10, 50, or 100 KES
 2. For amounts under 100: round to nearest 10
 3. For amounts 100-500: round to nearest 50
-4. For amounts over 500: round to nearest 100, but cap savings at 100 KES to avoid discouraging users
+4. For amounts over 500: round to nearest 100, but cap savings at 100 KES
 5. Consider user's spending capacity and current savings rate
-6. If savings rate is low (<5%), be more aggressive
-7. If transaction is unusual (much higher/lower than average), adjust accordingly
 
 Respond in JSON format:
 {
@@ -60,7 +55,7 @@ Respond in JSON format:
         {
           role: "system",
           content:
-            "You are a financial advisor AI. Always respond with valid JSON only, no additional text.",
+            "You are a financial advisor AI. Always respond with valid JSON only.",
         },
         {
           role: "user",

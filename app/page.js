@@ -1,26 +1,10 @@
-"use client";
+'use client';
 
-import React, { useState, useEffect } from "react";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-} from "recharts";
-import {
-  Wallet,
-  TrendingUp,
-  Brain,
-  ArrowUpRight,
-  Settings,
-  Zap,
-} from "lucide-react";
+import React, { useState, useEffect } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { Wallet, TrendingUp, Brain, ArrowUpRight, Zap, RefreshCw, LogOut } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import Script from 'next/script';
 
 const MpesaRoundupApp = () => {
   const [transactions, setTransactions] = useState([]);
@@ -28,13 +12,129 @@ const MpesaRoundupApp = () => {
   const [demoMode, setDemoMode] = useState(true);
   const [aiInsight, setAiInsight] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isLoadingReal, setIsLoadingReal] = useState(false);
+  const [showWithdraw, setShowWithdraw] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [withdrawPhone, setWithdrawPhone] = useState("");
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
+  const [paystackLoaded, setPaystackLoaded] = useState(false);
   const [settings, setSettings] = useState({
     autoSave: true,
     aiEnabled: true,
   });
 
-  // Simulate initial transactions
+  // Load Paystack script
   useEffect(() => {
+    const script = document.createElement("script");
+    script.src = "https://js.paystack.co/v1/inline.js";
+    script.async = true;
+    script.onload = () => {
+      console.log("✅ Paystack loaded");
+      setPaystackLoaded(true);
+    };
+    document.body.appendChild(script);
+
+    return () => {
+      document.body.removeChild(script);
+    };
+  }, []);
+
+  // Load transactions based on mode
+  useEffect(() => {
+    if (!demoMode) {
+      loadRealTransactions();
+      subscribeToRealTime();
+    } else {
+      loadDemoTransactions();
+    }
+  }, [demoMode]);
+
+  const loadRealTransactions = async () => {
+    setIsLoadingReal(true);
+    console.log("📊 Loading real transactions from Supabase...");
+
+    try {
+      const { data, error } = await supabase
+        .from("transactions")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(20);
+
+      if (error) {
+        console.error("Error loading transactions:", error);
+        setAiInsight("Failed to load transactions. Check database connection.");
+        return;
+      }
+
+      console.log(`✅ Loaded ${data.length} real transactions`);
+
+      const formatted = data.map(formatTransaction);
+      setTransactions(formatted);
+
+      const total = data.reduce(
+        (sum, t) => sum + parseFloat(t.amount_saved || 0),
+        0
+      );
+      setTotalSaved(total);
+
+      if (data.length > 0) {
+        setAiInsight(
+          `Loaded ${
+            data.length
+          } real transactions. Total saved: KES ${total.toFixed(2)}`
+        );
+      } else {
+        setAiInsight("No transactions yet. Click a button to save!");
+      }
+    } catch (err) {
+      console.error("Database error:", err);
+      setAiInsight("Database connection error. Check your .env.local");
+    } finally {
+      setIsLoadingReal(false);
+    }
+  };
+
+  const subscribeToRealTime = () => {
+    console.log("🔴 Subscribing to real-time updates...");
+
+    const subscription = supabase
+      .channel("transactions")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "transactions",
+        },
+        (payload) => {
+          console.log("🔔 New transaction received!", payload.new);
+          const newTransaction = formatTransaction(payload.new);
+          setTransactions((prev) => [newTransaction, ...prev]);
+          setTotalSaved((prev) => prev + parseFloat(payload.new.amount_saved));
+          setAiInsight(
+            `New transaction: Saved KES ${payload.new.amount_saved}!`
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      console.log("Unsubscribing from real-time updates");
+      subscription.unsubscribe();
+    };
+  };
+
+  const formatTransaction = (dbTransaction) => ({
+    id: dbTransaction.id,
+    amount: parseFloat(dbTransaction.amount_spent),
+    roundedTo: parseFloat(dbTransaction.rounded_to),
+    saved: parseFloat(dbTransaction.amount_saved),
+    date: dbTransaction.created_at,
+    aiReason: dbTransaction.ai_reason,
+    status: dbTransaction.status,
+  });
+
+  const loadDemoTransactions = () => {
     const initialTransactions = [
       {
         id: 1,
@@ -43,6 +143,7 @@ const MpesaRoundupApp = () => {
         saved: 17,
         date: new Date(Date.now() - 3600000 * 24 * 5).toISOString(),
         aiReason: "Low spending detected, conservative roundup",
+        status: "completed",
       },
       {
         id: 2,
@@ -51,6 +152,7 @@ const MpesaRoundupApp = () => {
         saved: 50,
         date: new Date(Date.now() - 3600000 * 24 * 4).toISOString(),
         aiReason: "Medium transaction, moderate savings",
+        status: "completed",
       },
       {
         id: 3,
@@ -59,6 +161,7 @@ const MpesaRoundupApp = () => {
         saved: 11,
         date: new Date(Date.now() - 3600000 * 24 * 3).toISOString(),
         aiReason: "Small purchase, minimal roundup",
+        status: "completed",
       },
       {
         id: 4,
@@ -67,6 +170,7 @@ const MpesaRoundupApp = () => {
         saved: 50,
         date: new Date(Date.now() - 3600000 * 24 * 2).toISOString(),
         aiReason: "Large transaction, capped savings",
+        status: "completed",
       },
       {
         id: 5,
@@ -75,16 +179,15 @@ const MpesaRoundupApp = () => {
         saved: 25,
         date: new Date(Date.now() - 3600000 * 24).toISOString(),
         aiReason: "Regular spending pattern detected",
+        status: "completed",
       },
     ];
     setTransactions(initialTransactions);
     setTotalSaved(initialTransactions.reduce((sum, t) => sum + t.saved, 0));
-  }, []);
+  };
 
-  // Simulate AI decision making with Groq
   const getAIRoundup = async (amount) => {
     if (!settings.aiEnabled) {
-      // Simple fixed roundup without AI
       if (amount < 100)
         return {
           roundTo: Math.ceil(amount / 10) * 10,
@@ -104,7 +207,6 @@ const MpesaRoundupApp = () => {
       };
     }
 
-    // Simulate AI analysis (in real app, this calls Groq API)
     const avgTransaction =
       transactions.length > 0
         ? transactions.reduce((sum, t) => sum + t.amount, 0) /
@@ -121,7 +223,6 @@ const MpesaRoundupApp = () => {
 
     let roundTo, saved, reason;
 
-    // AI Logic: Adaptive rounding based on spending patterns
     if (amount < 100) {
       roundTo = Math.ceil(amount / 10) * 10;
       saved = roundTo - amount;
@@ -130,7 +231,6 @@ const MpesaRoundupApp = () => {
       } your average). Conservative roundup to maintain momentum.`;
     } else if (amount < 500) {
       if (avgTransaction > 300 && savingsRate < 5) {
-        // User can afford more aggressive savings
         roundTo = Math.ceil(amount / 50) * 50;
         saved = roundTo - amount;
         reason = `Your spending capacity is high but savings rate is ${savingsRate}%. Moderate roundup recommended.`;
@@ -140,9 +240,8 @@ const MpesaRoundupApp = () => {
         reason = `Mid-range transaction. Balanced roundup to nearest 50 KES.`;
       }
     } else {
-      // Large transactions - cap savings to avoid discouragement
       roundTo = Math.ceil(amount / 100) * 100;
-      saved = Math.min(roundTo - amount, 100); // Cap at 100 KES
+      saved = Math.min(roundTo - amount, 100);
       roundTo = amount + saved;
       reason = `Large purchase detected. Capped savings at ${saved} KES to maintain affordability.`;
     }
@@ -150,10 +249,92 @@ const MpesaRoundupApp = () => {
     return { roundTo, saved, reason };
   };
 
-  const handleTransaction = async (amount) => {
+  // 🆕 Handle transaction with Paystack
+  const handleTransactionWithPaystack = async (amount) => {
+    if (!paystackLoaded) {
+      alert("Paystack is loading... Please wait a moment.");
+      return;
+    }
+
     setIsProcessing(true);
 
-    // Simulate API delay
+    try {
+      // Get AI decision
+      const aiDecision = await getAIRoundup(amount);
+      setAiInsight(
+        `AI recommends saving KES ${aiDecision.saved}. Opening payment...`
+      );
+
+      // Initialize Paystack payment
+      const handler = window.PaystackPop.setup({
+        key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
+        email: "user@habahaba.com", // In production, get from user profile
+        amount: aiDecision.saved * 100, // Convert to kobo (cents)
+        currency: "KES",
+        channels: ["mobile_money"], // M-PESA only
+        metadata: {
+          original_amount: amount,
+          rounded_to: aiDecision.roundTo,
+          ai_reason: aiDecision.reason,
+          purpose: "Roundup Savings",
+        },
+        callback: async function (response) {
+          console.log("✅ Payment successful:", response);
+
+          // Save to Supabase
+          try {
+            const { data, error } = await supabase
+              .from("transactions")
+              .insert({
+                phone_number: "254700000000", // Get from user
+                amount_spent: amount,
+                amount_saved: aiDecision.saved,
+                rounded_to: aiDecision.roundTo,
+                ai_reason: aiDecision.reason,
+                status: "completed",
+                mpesa_transaction_id: response.reference,
+              })
+              .select()
+              .single();
+
+            if (error) {
+              console.error("Database error:", error);
+            } else {
+              console.log("✅ Saved to database:", data);
+
+              // Update UI
+              const newTransaction = formatTransaction(data);
+              setTransactions((prev) => [newTransaction, ...prev]);
+              setTotalSaved((prev) => prev + aiDecision.saved);
+              setAiInsight(
+                `✅ Saved KES ${aiDecision.saved}! ${aiDecision.reason}`
+              );
+            }
+          } catch (err) {
+            console.error("Error saving:", err);
+          }
+
+          setIsProcessing(false);
+        },
+        onClose: function () {
+          console.log("Payment cancelled");
+          setAiInsight("Payment cancelled");
+          setIsProcessing(false);
+        },
+      });
+
+      handler.openIframe();
+    } catch (error) {
+      console.error("Payment error:", error);
+      setAiInsight("Error initializing payment");
+      setIsProcessing(false);
+    }
+  };
+
+  // Demo mode handler (simulation)
+  const handleDemoTransaction = async (amount) => {
+    setIsProcessing(true);
+
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
     const aiDecision = await getAIRoundup(amount);
@@ -165,6 +346,7 @@ const MpesaRoundupApp = () => {
       saved: aiDecision.saved,
       date: new Date().toISOString(),
       aiReason: aiDecision.reason,
+      status: "completed",
     };
 
     setTransactions([newTransaction, ...transactions]);
@@ -173,9 +355,68 @@ const MpesaRoundupApp = () => {
     setIsProcessing(false);
   };
 
+  const handleTransaction = (amount) => {
+    if (demoMode) {
+      handleDemoTransaction(amount);
+    } else {
+      handleTransactionWithPaystack(amount);
+    }
+  };
+
+  // 🆕 Handle withdrawal
+  const handleWithdraw = async () => {
+    if (!withdrawAmount || !withdrawPhone) {
+      alert("Please enter amount and phone number");
+      return;
+    }
+
+    const amount = parseFloat(withdrawAmount);
+
+    if (amount > totalSaved) {
+      alert(`Insufficient balance. You have KES ${totalSaved.toFixed(2)}`);
+      return;
+    }
+
+    if (amount < 10) {
+      alert("Minimum withdrawal is KES 10");
+      return;
+    }
+
+    setIsWithdrawing(true);
+
+    try {
+      const response = await fetch("/api/paystack/withdraw", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phoneNumber: withdrawPhone,
+          amount: amount,
+          reason: "Haba Haba Savings Withdrawal",
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        alert(`✅ KES ${amount} sent to ${withdrawPhone} successfully!`);
+        setTotalSaved((prev) => prev - amount);
+        setWithdrawAmount("");
+        setWithdrawPhone("");
+        setShowWithdraw(false);
+        loadRealTransactions();
+      } else {
+        alert(`❌ Withdrawal failed: ${data.error}`);
+      }
+    } catch (error) {
+      console.error("Withdrawal error:", error);
+      alert("Withdrawal failed. Please try again.");
+    } finally {
+      setIsWithdrawing(false);
+    }
+  };
+
   const quickTransactions = [150, 233, 450, 89, 1200, 675];
 
-  // Chart data
   const chartData = transactions
     .slice(0, 10)
     .reverse()
@@ -208,18 +449,23 @@ const MpesaRoundupApp = () => {
                 <h1 className="text-3xl font-bold text-gray-800">
                   Haba Haba Savings
                 </h1>
-                <p className="text-gray-500">AI-Powered M-Pesa Roundup</p>
+                <p className="text-gray-500">
+                  AI-Powered M-Pesa Roundup via Paystack
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-3">
               <span
-                className={`px-3 py-1 rounded-full text-sm font-medium ${
+                className={`px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2 ${
                   demoMode
                     ? "bg-yellow-100 text-yellow-700"
                     : "bg-green-100 text-green-700"
                 }`}
               >
-                {demoMode ? "🎮 Demo Mode" : "🔗 Live M-Pesa"}
+                {!demoMode && (
+                  <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                )}
+                {demoMode ? "🎮 Demo Mode" : "💳 Paystack Live"}
               </span>
               <button
                 onClick={() => setDemoMode(!demoMode)}
@@ -227,6 +473,29 @@ const MpesaRoundupApp = () => {
               >
                 Toggle Mode
               </button>
+              {!demoMode && (
+                <>
+                  <button
+                    onClick={loadRealTransactions}
+                    disabled={isLoadingReal}
+                    className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                  >
+                    <RefreshCw
+                      className={`w-4 h-4 ${
+                        isLoadingReal ? "animate-spin" : ""
+                      }`}
+                    />
+                    Refresh
+                  </button>
+                  <button
+                    onClick={() => setShowWithdraw(true)}
+                    className="px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Withdraw
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
@@ -237,7 +506,9 @@ const MpesaRoundupApp = () => {
                 <span className="text-green-100">Total Saved</span>
                 <TrendingUp className="w-5 h-5" />
               </div>
-              <div className="text-3xl font-bold">KES {totalSaved}</div>
+              <div className="text-3xl font-bold">
+                KES {totalSaved.toFixed(2)}
+              </div>
               <div className="text-green-100 text-sm mt-1">
                 {transactions.length} transactions
               </div>
@@ -251,7 +522,7 @@ const MpesaRoundupApp = () => {
               <div className="text-3xl font-bold text-gray-800">
                 KES{" "}
                 {transactions.length > 0
-                  ? Math.round(totalSaved / transactions.length)
+                  ? (totalSaved / transactions.length).toFixed(2)
                   : 0}
               </div>
               <div className="text-gray-500 text-sm mt-1">per transaction</div>
@@ -277,20 +548,81 @@ const MpesaRoundupApp = () => {
           </div>
         </div>
 
+        {/* Withdrawal Modal */}
+        {showWithdraw && !demoMode && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+              <h2 className="text-2xl font-bold mb-4">Withdraw Savings</h2>
+              <p className="text-gray-600 mb-4">
+                Available balance:{" "}
+                <span className="font-bold text-green-600">
+                  KES {totalSaved.toFixed(2)}
+                </span>
+              </p>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Phone Number (M-PESA)
+                  </label>
+                  <input
+                    type="tel"
+                    placeholder="254700000000"
+                    value={withdrawPhone}
+                    onChange={(e) => setWithdrawPhone(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Amount (KES)
+                  </label>
+                  <input
+                    type="number"
+                    placeholder="Enter amount"
+                    value={withdrawAmount}
+                    onChange={(e) => setWithdrawAmount(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Minimum: KES 10</p>
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowWithdraw(false)}
+                    disabled={isWithdrawing}
+                    className="flex-1 px-4 py-3 bg-gray-200 hover:bg-gray-300 rounded-lg font-medium transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleWithdraw}
+                    disabled={isWithdrawing}
+                    className="flex-1 px-4 py-3 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 disabled:from-gray-300 disabled:to-gray-400 text-white rounded-lg font-medium transition-all"
+                  >
+                    {isWithdrawing ? "Processing..." : "Withdraw"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column - Transaction Simulator */}
+          {/* Left Column - Transaction Buttons */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-2xl shadow-xl p-6 mb-6">
               <div className="flex items-center gap-2 mb-4">
                 <Zap className="w-5 h-5 text-yellow-500" />
                 <h2 className="text-xl font-bold text-gray-800">
-                  Simulate Transaction
+                  {demoMode ? "Simulate Transaction" : "Save Money"}
                 </h2>
               </div>
 
               <div className="space-y-3">
                 <p className="text-sm text-gray-600">
-                  Click to simulate M-Pesa spending:
+                  {demoMode ? "Click to simulate spending:" : "I just spent:"}
                 </p>
                 {quickTransactions.map((amount, i) => (
                   <button
@@ -299,7 +631,9 @@ const MpesaRoundupApp = () => {
                     disabled={isProcessing}
                     className="w-full py-3 px-4 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 disabled:from-gray-300 disabled:to-gray-400 text-white rounded-lg font-medium transition-all transform hover:scale-105 active:scale-95"
                   >
-                    Spend KES {amount}
+                    {demoMode
+                      ? `Spend KES ${amount}`
+                      : `Save from KES ${amount}`}
                   </button>
                 ))}
               </div>
@@ -307,12 +641,37 @@ const MpesaRoundupApp = () => {
               {isProcessing && (
                 <div className="mt-4 text-center">
                   <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-green-500 border-t-transparent"></div>
-                  <p className="text-sm text-gray-600 mt-2">AI analyzing...</p>
+                  <p className="text-sm text-gray-600 mt-2">
+                    {demoMode ? "AI analyzing..." : "Processing payment..."}
+                  </p>
                 </div>
               )}
             </div>
 
-            {/* AI Insight */}
+            {/* Paystack Info */}
+            {!demoMode && (
+              <div className="bg-blue-50 border-2 border-blue-200 rounded-2xl p-5 mb-6">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
+                    <span className="text-white text-xl">💳</span>
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-blue-900 mb-2">
+                      Powered by Paystack
+                    </h3>
+                    <p className="text-xs text-blue-700 mb-2">
+                      Secure M-PESA payments
+                    </p>
+                    <ul className="text-xs text-blue-600 space-y-1">
+                      <li>✓ Instant transactions</li>
+                      <li>✓ Bank-level security</li>
+                      <li>✓ Real-time confirmations</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {aiInsight && (
               <div className="bg-purple-50 border-2 border-purple-200 rounded-2xl p-5">
                 <div className="flex items-start gap-3">
@@ -336,63 +695,69 @@ const MpesaRoundupApp = () => {
                 Savings Analytics
               </h2>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <h3 className="text-sm font-medium text-gray-600 mb-3">
-                    Transaction History
-                  </h3>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <LineChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" />
-                      <YAxis />
-                      <Tooltip />
-                      <Line
-                        type="monotone"
-                        dataKey="spent"
-                        stroke="#6366f1"
-                        strokeWidth={2}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="saved"
-                        stroke="#10b981"
-                        strokeWidth={2}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+              {isLoadingReal ? (
+                <div className="flex items-center justify-center h-64">
+                  <div className="animate-spin rounded-full h-12 w-12 border-4 border-green-500 border-t-transparent"></div>
                 </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-600 mb-3">
+                      Transaction History
+                    </h3>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <LineChart data={chartData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" />
+                        <YAxis />
+                        <Tooltip />
+                        <Line
+                          type="monotone"
+                          dataKey="spent"
+                          stroke="#6366f1"
+                          strokeWidth={2}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="saved"
+                          stroke="#10b981"
+                          strokeWidth={2}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
 
-                <div>
-                  <h3 className="text-sm font-medium text-gray-600 mb-3">
-                    Savings Progress
-                  </h3>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <PieChart>
-                      <Pie
-                        data={savingsBreakdown}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={80}
-                        paddingAngle={5}
-                        dataKey="value"
-                      >
-                        {savingsBreakdown.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="text-center mt-2">
-                    <p className="text-2xl font-bold text-green-600">
-                      KES {totalSaved}
-                    </p>
-                    <p className="text-sm text-gray-500">Goal: KES 500</p>
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-600 mb-3">
+                      Savings Progress
+                    </h3>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <PieChart>
+                        <Pie
+                          data={savingsBreakdown}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={80}
+                          paddingAngle={5}
+                          dataKey="value"
+                        >
+                          {savingsBreakdown.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="text-center mt-2">
+                      <p className="text-2xl font-bold text-green-600">
+                        KES {totalSaved.toFixed(2)}
+                      </p>
+                      <p className="text-sm text-gray-500">Goal: KES 500</p>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Transaction List */}
@@ -402,9 +767,13 @@ const MpesaRoundupApp = () => {
               </h2>
               <div className="space-y-3 max-h-96 overflow-y-auto">
                 {transactions.length === 0 ? (
-                  <p className="text-gray-500 text-center py-8">
-                    No transactions yet. Start saving!
-                  </p>
+                  <div className="text-center py-12">
+                    <p className="text-gray-500 mb-2">
+                      {demoMode
+                        ? "No transactions yet. Start saving!"
+                        : "No transactions yet. Click a button to save!"}
+                    </p>
+                  </div>
                 ) : (
                   transactions.map((t) => (
                     <div
@@ -414,7 +783,9 @@ const MpesaRoundupApp = () => {
                       <div className="flex justify-between items-start mb-2">
                         <div>
                           <div className="font-medium text-gray-800">
-                            KES {t.amount} → KES {t.roundedTo}
+                            {t.amount > 0
+                              ? `KES ${t.amount} → KES ${t.roundedTo}`
+                              : "Withdrawal"}
                           </div>
                           <div className="text-sm text-gray-500">
                             {new Date(t.date).toLocaleDateString()} at{" "}
@@ -422,10 +793,23 @@ const MpesaRoundupApp = () => {
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="text-green-600 font-bold">
-                            +{t.saved} KES
+                          <div
+                            className={`font-bold ${
+                              t.saved >= 0 ? "text-green-600" : "text-red-600"
+                            }`}
+                          >
+                            {t.saved >= 0 ? "+" : ""}
+                            {t.saved} KES
                           </div>
-                          <div className="text-xs text-gray-500">saved</div>
+                          <div
+                            className={`text-xs ${
+                              t.status === "completed"
+                                ? "text-green-600"
+                                : "text-yellow-600"
+                            }`}
+                          >
+                            {t.status}
+                          </div>
                         </div>
                       </div>
                       <div className="text-xs text-purple-600 bg-purple-50 rounded p-2 mt-2">
@@ -442,8 +826,17 @@ const MpesaRoundupApp = () => {
         {/* Footer Info */}
         <div className="mt-6 bg-blue-50 border-2 border-blue-200 rounded-xl p-4 text-center">
           <p className="text-sm text-blue-800">
-            <strong>Demo Mode:</strong> Simulating M-Pesa transactions. Real
-            integration ready with Daraja API.
+            {demoMode ? (
+              <>
+                <strong>Demo Mode:</strong> Simulating transactions. Switch to
+                Paystack Live to save real money.
+              </>
+            ) : (
+              <>
+                <strong>Paystack Live:</strong> Secure M-PESA payments. Instant
+                withdrawals available.
+              </>
+            )}
             <br />
             <strong>AI Powered by Groq:</strong> Learns your spending habits to
             optimize savings.
