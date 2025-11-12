@@ -15,7 +15,14 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Format phone number - Remove 254 prefix if present
+    let formattedPhone = phoneNumber;
+    if (phoneNumber.startsWith("254")) {
+      formattedPhone = "0" + phoneNumber.substring(3); // 254745972459 -> 0745972459
+    }
+
     console.log(`💸 Processing withdrawal: KES ${amount} to ${phoneNumber}`);
+    console.log(`📱 Formatted phone: ${formattedPhone}`);
 
     // Step 1: Create transfer recipient
     const recipientResponse = await fetch(
@@ -28,9 +35,9 @@ export default async function handler(req, res) {
         },
         body: JSON.stringify({
           type: "mobile_money",
-          name: "User", // In production, use actual user name
-          account_number: phoneNumber,
-          bank_code: "mpesa", // M-PESA bank code
+          name: "Haba Haba User",
+          account_number: formattedPhone, // ✅ Use formatted phone
+          bank_code: "MPESA",
           currency: "KES",
         }),
       }
@@ -39,6 +46,7 @@ export default async function handler(req, res) {
     const recipientData = await recipientResponse.json();
 
     if (!recipientData.status) {
+      console.error("❌ Recipient error:", recipientData);
       throw new Error(recipientData.message || "Failed to create recipient");
     }
 
@@ -53,7 +61,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         source: "balance",
-        amount: amount * 100, // Convert to kobo (cents)
+        amount: amount * 100,
         recipient: recipientData.data.recipient_code,
         reason: reason || "Haba Haba Savings Withdrawal",
         currency: "KES",
@@ -73,10 +81,10 @@ export default async function handler(req, res) {
       );
 
       await supabase.from("transactions").insert({
-        user_id: userId,
+        user_id: userId || null,
         phone_number: phoneNumber,
         amount_spent: 0,
-        amount_saved: -amount, // Negative for withdrawal
+        amount_saved: -amount,
         rounded_to: 0,
         ai_reason: reason || "Withdrawal",
         status: "completed",
@@ -89,6 +97,7 @@ export default async function handler(req, res) {
         message: "Money sent to M-PESA successfully!",
       });
     } else {
+      console.error("❌ Transfer error:", transferData);
       throw new Error(transferData.message || "Transfer failed");
     }
   } catch (error) {
